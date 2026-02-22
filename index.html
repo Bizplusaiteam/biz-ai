@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI OCR 服务器控制台</title>
+    <style>
+        * { box-sizing: border-box; }
+        html { height: 100%; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            height: 100%;
+            font-family: -apple-system, sans-serif;
+            color: #333;
+            display: grid;
+            grid-template-rows: auto 1fr;
+            overflow: hidden;
+        }
+        
+        .page-header {
+            display: flex;
+            align-items: stretch;
+            gap: 12px;
+            padding: 10px 14px;
+            background: #f6f8fa;
+            border-bottom: 1px solid #e1e4e8;
+            min-height: 0;
+        }
+        .page-header h1 { margin: 0; font-size: 1.2rem; font-weight: 600; white-space: nowrap; }
+        .status-box {
+            background: #fff;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            border: 1px solid #d1d5da;
+            align-self: center;
+            flex-shrink: 0;
+        }
+        .controls { display: flex; gap: 6px; flex-shrink: 0; align-self: center; }
+        button {
+            cursor: pointer;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: none;
+            font-size: 12px;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-start { background-color: #2ea44f; color: white; }
+        .btn-stop { background-color: #cb2431; color: white; }
+        .btn-refresh { background-color: #0366d6; color: white; }
+        
+        #logs {
+            flex: 1;
+            min-width: 0;
+            background: #24292e;
+            color: #e1e4e8;
+            padding: 6px 10px;
+            font-family: 'SFMono-Regular', Consolas, monospace;
+            font-size: 11px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            border-radius: 6px;
+        }
+        
+        .dify-section {
+            min-height: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .dify-iframe-container {
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+            background: #f9fafb;
+            position: relative;
+            height: 100%;
+        }
+        #difyIframe {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+            background: #fff;
+        }
+        .dify-placeholder {
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #6b7280;
+            font-size: 16px;
+            background: #f9fafb;
+        }
+        .dify-placeholder.hidden { display: none !important; }
+        #difyIframe { z-index: 1; }
+        .dify-placeholder .icon { font-size: 48px; margin-bottom: 15px; }
+        .dify-fallback {
+            position: absolute;
+            left: 0; top: 0; right: 0; bottom: 0;
+            z-index: 4;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            background: #f0f4f8;
+            padding: 24px;
+            text-align: center;
+        }
+        .dify-fallback.visible { display: flex; }
+        .dify-fallback p { margin: 0; color: #374151; font-size: 15px; }
+        .dify-fallback-btns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+        .dify-fallback-btns a {
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .dify-fallback-btns a.primary { background: #0366d6; color: #fff; }
+        .dify-fallback-btns a.secondary { background: #e5e7eb; color: #374151; }
+    </style>
+</head>
+<body>
+
+    <header class="page-header">
+        <h1>🚀 AI OCR 服务器控制台</h1>
+        <div id="statusDisplay" class="status-box">检测中...</div>
+        <div class="controls">
+            <button onclick="checkStatus()" class="btn-refresh">🔄 刷新状态</button>
+            <button onclick="controlServer('start')" class="btn-start">▶️ 启动</button>
+            <button onclick="controlServer('stop')" class="btn-stop">⏹️ 停止</button>
+        </div>
+        <div id="logs"></div>
+    </header>
+
+    <main id="difySection" class="dify-section">
+        <div class="dify-iframe-container">
+            <div id="difyPlaceholder" class="dify-placeholder">
+                <div class="icon">⏳</div>
+                <div>正在加载 AI 分析工具...</div>
+            </div>
+            <iframe id="difyIframe" title="Dify AI 工作流" allow="clipboard-read; clipboard-write" width="100%" height="100%"></iframe>
+            <div id="difyFallback" class="dify-fallback">
+                <p>若上方未显示 Dify 工作流（被浏览器或网站限制嵌入），请选择下方方式打开：</p>
+                <div class="dify-fallback-btns">
+                    <a id="difyOpenSame" href="#" class="primary">在本页打开 Dify 工作流</a>
+                    <a id="difyOpenNew" href="#" target="_blank" rel="noopener" class="secondary">在新标签页打开</a>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // ==========================================
+        // 🔧 配置区域 (部署前只需修改这里)
+        // ==========================================
+        
+        // 1. API Gateway 的 Invoke URL (从 AWS 控制台获取)
+        // 格式通常是: https://xxxxxx.execute-api.us-east-1.amazonaws.com/prod/server-control
+        const API_ENDPOINT = 'https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/prod/server-control';
+        
+        // 2. Dify 工作流嵌入 URL (从 Dify Cloud 控制台获取)
+        // 格式通常是: https://cloud.dify.ai/workflows/YOUR_WORKFLOW_ID/embed?theme=light&language=zh-CN
+        //const DIFY_EMBED_URL = 'https://cloud.dify.ai/workflows/YOUR_WORKFLOW_ID/embed?theme=light&language=zh-CN';
+        const DIFY_EMBED_URL = 'https://udify.app/workflow/AEVEalXQRsh4bmEi';
+        
+        // 3. (可选) 如果在 API Gateway 开启了 API Key 验证，请填入
+        const API_KEY = ''; 
+
+        // ==========================================
+        // 🚀 逻辑区域
+        // ==========================================
+
+        // 全局状态跟踪
+        let currentServerStatus = null;
+
+        async function callLambda(action) {
+            const statusDiv = document.getElementById('statusDisplay');
+            const logDiv = document.getElementById('logs');
+            
+            log(`[发送请求] Action: ${action}...`);
+
+            try {
+                const headers = {
+                    'Content-Type': 'application/json'
+                };
+                
+                if (API_KEY) {
+                    headers['x-api-key'] = API_KEY;
+                }
+
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({ action: action })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                // 更新UI和状态
+                if (data.status) {
+                    const statusText = data.status.toUpperCase();
+                    let color = '#333';
+                    
+                    if (statusText === 'RUNNING') color = '#2ea44f';
+                    else if (statusText === 'STOPPED') color = '#cb2431';
+                    else if (statusText === 'PENDING' || statusText === 'STOPPING') color = '#dbab09';
+                    
+                    const ipInfo = data.ip && data.ip !== 'N/A' ? ` (IP: ${data.ip})` : '';
+                    statusDiv.innerHTML = `<span style="color:${color}">${statusText}</span>${ipInfo}`;
+                    
+                    // 更新全局状态（Dify 区域当前默认常显，不随状态切换）
+                    currentServerStatus = statusText;
+                }
+                
+                log(`[响应成功] ${JSON.stringify(data)}`);
+                return data;
+
+            } catch (error) {
+                console.error('API Error:', error);
+                statusDiv.innerHTML = '<span style="color:#cb2431">⚠️ 连接失败</span>';
+                log(`[错误] ${error.message}`);
+                return null;
+            }
+        }
+
+        // 页面加载时显示 Dify 区域并加载 iframe（默认进入即可使用）
+        function initDifySection() {
+            const difySection = document.getElementById('difySection');
+            const difyIframe = document.getElementById('difyIframe');
+            const difyPlaceholder = document.getElementById('difyPlaceholder');
+            
+            difySection.style.display = 'block';
+            if (!difyIframe.src) {
+                // 先显示 iframe，占位层盖在上面；这样 iframe 始终参与布局，Dify 能正确渲染
+                difyIframe.style.display = 'block';
+                difyIframe.src = DIFY_EMBED_URL;
+                difyIframe.onload = function() {
+                    window._difyIframeLoaded = true;
+                    difyPlaceholder.classList.add('hidden');
+                    log('[Dify] AI分析工具已加载完成');
+                    // 嵌入成功则不显示角标链接，保持界面干净
+                };
+                difyIframe.onerror = function() {
+                    difyPlaceholder.classList.add('hidden');
+                    difyPlaceholder.innerHTML = `
+                        <div class="icon">❌</div>
+                        <div>AI分析工具加载失败</div>
+                        <small style="margin-top: 10px;">请检查DIFY_EMBED_URL配置</small>
+                    `;
+                    difyPlaceholder.classList.remove('hidden');
+                    log('[Dify错误] iframe加载失败，请检查DIFY_EMBED_URL配置');
+                };
+                // 若 8 秒后仍未 onload，隐藏占位层并显示备用入口（链接 + 大面板）
+                setTimeout(function() {
+                    if (!difyPlaceholder.classList.contains('hidden')) {
+                        difyPlaceholder.classList.add('hidden');
+                        log('[Dify] 已显示嵌入页面（若仍空白请检查网络或 DIFY_EMBED_URL）');
+                    }
+                    showDifyFallbackLink();
+                    if (!window._difyIframeLoaded) {
+                        var fb = document.getElementById('difyFallback');
+                        if (fb) fb.classList.add('visible');
+                    }
+                }, 8000);
+            }
+        }
+        function showDifyFallbackLink() {
+            var container = document.querySelector('.dify-iframe-container');
+            if (!container || document.getElementById('difyFallbackLink')) return;
+            var a = document.createElement('a');
+            a.id = 'difyFallbackLink';
+            a.href = DIFY_EMBED_URL;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.style.cssText = 'position:absolute;bottom:12px;right:12px;z-index:3;padding:8px 12px;background:#24292e;color:#e1e4e8;border-radius:6px;font-size:12px;text-decoration:none;';
+            a.textContent = '在新标签页打开 Dify';
+            container.appendChild(a);
+        }
+
+        function controlServer(action) {
+            if (!confirm(`确定要执行 ${action.toUpperCase()} 操作吗？`)) return;
+            callLambda(action);
+        }
+
+        function checkStatus() {
+            callLambda('status');
+        }
+
+        function log(msg) {
+            const logDiv = document.getElementById('logs');
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerText = `[${time}] ${msg}\n` + logDiv.innerText;
+        }
+
+        // 页面加载时：等布局稳定后再加载 iframe，并检查 EC2 状态
+        window.onload = function() {
+            var openSame = document.getElementById('difyOpenSame');
+            var openNew = document.getElementById('difyOpenNew');
+            if (openSame) { openSame.href = DIFY_EMBED_URL; openSame.onclick = function(e) { e.preventDefault(); window.location.href = DIFY_EMBED_URL; }; }
+            if (openNew) openNew.href = DIFY_EMBED_URL;
+            requestAnimationFrame(function() {
+                requestAnimationFrame(function() {
+                    initDifySection();
+                });
+            });
+            checkStatus();
+        };
+    </script>
+</body>
+</html>
