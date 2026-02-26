@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI OCR 服务器控制台</title>
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6/dist/amazon-cognito-identity.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         html { height: 100%; }
@@ -17,7 +18,53 @@
             grid-template-rows: auto 1fr;
             overflow: hidden;
         }
-        
+
+        /* Login overlay */
+        .login-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            background: #f6f8fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-overlay.hidden { display: none; }
+        .login-box {
+            background: #fff;
+            border: 1px solid #d1d5da;
+            border-radius: 12px;
+            padding: 32px;
+            width: 360px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .login-box h2 { margin: 0 0 20px; font-size: 1.3rem; text-align: center; }
+        .login-box label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .login-box input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #d1d5da;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-bottom: 14px;
+        }
+        .login-box input:focus { outline: none; border-color: #0366d6; box-shadow: 0 0 0 3px rgba(3,102,214,0.15); }
+        .login-box button {
+            width: 100%;
+            padding: 10px;
+            background: #2ea44f;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .login-box button:hover { background: #2c974b; }
+        .login-box button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .login-error { color: #cb2431; font-size: 13px; margin-bottom: 10px; display: none; }
+        .login-info { color: #0366d6; font-size: 13px; margin-bottom: 10px; display: none; }
+
         .page-header {
             display: flex;
             align-items: stretch;
@@ -53,7 +100,8 @@
         .btn-start { background-color: #2ea44f; color: white; }
         .btn-stop { background-color: #cb2431; color: white; }
         .btn-refresh { background-color: #0366d6; color: white; }
-        
+        .btn-logout { background-color: #6a737d; color: white; font-size: 11px; padding: 4px 8px; }
+
         #logs {
             flex: 1;
             min-width: 0;
@@ -66,7 +114,7 @@
             white-space: pre-wrap;
             border-radius: 6px;
         }
-        
+
         .dify-section {
             min-height: 0;
             overflow: hidden;
@@ -139,13 +187,35 @@
 </head>
 <body>
 
+    <!-- Login overlay -->
+    <div id="loginOverlay" class="login-overlay">
+        <div class="login-box">
+            <h2>AI OCR 服务器控制台</h2>
+            <div id="loginError" class="login-error"></div>
+            <div id="loginInfo" class="login-info"></div>
+            <div id="loginForm">
+                <label for="loginEmail">邮箱</label>
+                <input type="email" id="loginEmail" placeholder="you@bizplus-inc.com">
+                <label for="loginPassword">密码</label>
+                <input type="password" id="loginPassword" placeholder="请输入密码">
+                <button id="loginBtn" onclick="doLogin()">登录</button>
+            </div>
+            <div id="newPwForm" style="display:none;">
+                <label for="newPassword">设置新密码</label>
+                <input type="password" id="newPassword" placeholder="新密码（8位以上）">
+                <button id="newPwBtn" onclick="doSetNewPassword()">确认修改</button>
+            </div>
+        </div>
+    </div>
+
     <header class="page-header">
-        <h1>🚀 AI OCR 服务器控制台</h1>
+        <h1>AI OCR 服务器控制台</h1>
         <div id="statusDisplay" class="status-box">检测中...</div>
         <div class="controls">
-            <button onclick="checkStatus()" class="btn-refresh">🔄 刷新状态</button>
-            <button onclick="controlServer('start')" class="btn-start">▶️ 启动</button>
-            <button onclick="controlServer('stop')" class="btn-stop">⏹️ 停止</button>
+            <button onclick="checkStatus()" class="btn-refresh">刷新状态</button>
+            <button onclick="controlServer('start')" class="btn-start">启动</button>
+            <button onclick="controlServer('stop')" class="btn-stop">停止</button>
+            <button onclick="doLogout()" class="btn-logout">登出</button>
         </div>
         <div id="logs"></div>
     </header>
@@ -169,114 +239,287 @@
 
     <script>
         // ==========================================
-        // 🔧 配置区域 (部署前只需修改这里)
+        // 配置区域
         // ==========================================
-        
-        // 1. API Gateway 的 Invoke URL (从 AWS 控制台获取)
-        // 格式通常是: https://xxxxxx.execute-api.us-east-1.amazonaws.com/prod/server-control
-        const API_ENDPOINT = 'https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/prod/server-control';
-        
-        // 2. Dify 工作流嵌入 URL (从 Dify Cloud 控制台获取)
-        // 格式通常是: https://cloud.dify.ai/workflows/YOUR_WORKFLOW_ID/embed?theme=light&language=zh-CN
-        //const DIFY_EMBED_URL = 'https://cloud.dify.ai/workflows/YOUR_WORKFLOW_ID/embed?theme=light&language=zh-CN';
+
+        const API_ENDPOINT = 'https://u1cj6rsil4.execute-api.ap-northeast-1.amazonaws.com/prod/server-control';
+
+        const COGNITO_USER_POOL_ID = 'ap-northeast-1_QUAsebRwA';
+        const COGNITO_CLIENT_ID = '3lcpua2fddokqtkdbps7cha1rd';
+
         const DIFY_EMBED_URL = 'https://udify.app/workflow/AEVEalXQRsh4bmEi';
-        
-        // 3. (可选) 如果在 API Gateway 开启了 API Key 验证，请填入
-        const API_KEY = ''; 
 
         // ==========================================
-        // 🚀 逻辑区域
+        // Cognito 认证
         // ==========================================
 
-        // 全局状态跟踪
+        const poolData = {
+            UserPoolId: COGNITO_USER_POOL_ID,
+            ClientId: COGNITO_CLIENT_ID
+        };
+        const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
+        let cognitoUser = null;
+        let pendingNewPasswordCallback = null;
+        let sessionCheckInterval = null;
+
+        function getIdToken() {
+            var user = userPool.getCurrentUser();
+            if (!user) return null;
+            return new Promise(function(resolve) {
+                user.getSession(function(err, session) {
+                    if (err || !session || !session.isValid()) { resolve(null); return; }
+                    resolve(session.getIdToken().getJwtToken());
+                });
+            });
+        }
+
+        function doLogin() {
+            var email = document.getElementById('loginEmail').value.trim();
+            var password = document.getElementById('loginPassword').value;
+            var errorDiv = document.getElementById('loginError');
+            var infoDiv = document.getElementById('loginInfo');
+            var btn = document.getElementById('loginBtn');
+            errorDiv.style.display = 'none';
+            infoDiv.style.display = 'none';
+
+            if (!email || !password) {
+                errorDiv.textContent = '请输入邮箱和密码';
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = '登录中...';
+
+            var authDetails = new AmazonCognitoIdentity.AuthenticationDetails({
+                Username: email,
+                Password: password
+            });
+            cognitoUser = new AmazonCognitoIdentity.CognitoUser({
+                Username: email,
+                Pool: userPool
+            });
+
+            cognitoUser.authenticateUser(authDetails, {
+                onSuccess: function(result) {
+                    // 单会话: 撤销所有其他会话，再重新认证
+                    cognitoUser.globalSignOut({
+                        onSuccess: function() {
+                            var freshUser = new AmazonCognitoIdentity.CognitoUser({ Username: email, Pool: userPool });
+                            freshUser.authenticateUser(authDetails, {
+                                onSuccess: function() {
+                                    cognitoUser = freshUser;
+                                    btn.disabled = false;
+                                    btn.textContent = '登录';
+                                    onLoginSuccess();
+                                },
+                                onFailure: function() {
+                                    btn.disabled = false;
+                                    btn.textContent = '登录';
+                                    onLoginSuccess();
+                                }
+                            });
+                        },
+                        onFailure: function() {
+                            btn.disabled = false;
+                            btn.textContent = '登录';
+                            onLoginSuccess();
+                        }
+                    });
+                },
+                onFailure: function(err) {
+                    btn.disabled = false;
+                    btn.textContent = '登录';
+                    errorDiv.textContent = err.message || '登录失败';
+                    errorDiv.style.display = 'block';
+                },
+                newPasswordRequired: function(userAttributes, requiredAttributes) {
+                    btn.disabled = false;
+                    btn.textContent = '登录';
+                    pendingNewPasswordCallback = { userAttributes: userAttributes };
+                    document.getElementById('loginForm').style.display = 'none';
+                    document.getElementById('newPwForm').style.display = 'block';
+                    infoDiv.textContent = '首次登录，请设置新密码';
+                    infoDiv.style.display = 'block';
+                }
+            });
+        }
+
+        function doSetNewPassword() {
+            var newPw = document.getElementById('newPassword').value;
+            var errorDiv = document.getElementById('loginError');
+            var btn = document.getElementById('newPwBtn');
+            errorDiv.style.display = 'none';
+
+            if (!newPw || newPw.length < 8) {
+                errorDiv.textContent = '密码至少8个字符';
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = '设置中...';
+
+            cognitoUser.completeNewPasswordChallenge(newPw, {}, {
+                onSuccess: function(result) {
+                    btn.disabled = false;
+                    btn.textContent = '确认修改';
+                    onLoginSuccess();
+                },
+                onFailure: function(err) {
+                    btn.disabled = false;
+                    btn.textContent = '确认修改';
+                    errorDiv.textContent = err.message || '密码设置失败';
+                    errorDiv.style.display = 'block';
+                }
+            });
+        }
+
+        function onLoginSuccess() {
+            document.getElementById('loginOverlay').classList.add('hidden');
+            log('[认证] 登录成功');
+            checkStatus();
+            // 每5分钟检查会话有效性（被其他设备踢出时自动登出）
+            if (sessionCheckInterval) clearInterval(sessionCheckInterval);
+            sessionCheckInterval = setInterval(validateSession, 5 * 60 * 1000);
+            requestAnimationFrame(function() {
+                requestAnimationFrame(function() {
+                    initDifySection();
+                });
+            });
+        }
+
+        function validateSession() {
+            var user = userPool.getCurrentUser();
+            if (!user) { forceLogout('会话不存在'); return; }
+            user.getSession(function(err, session) {
+                if (err || !session || !session.isValid()) {
+                    forceLogout('会话已失效（可能已在其他设备登录）');
+                }
+            });
+        }
+
+        function forceLogout(reason) {
+            if (sessionCheckInterval) { clearInterval(sessionCheckInterval); sessionCheckInterval = null; }
+            var user = userPool.getCurrentUser();
+            if (user) user.signOut();
+            document.getElementById('loginOverlay').classList.remove('hidden');
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('newPwForm').style.display = 'none';
+            document.getElementById('loginError').style.display = 'none';
+            document.getElementById('loginInfo').style.display = 'none';
+            document.getElementById('loginPassword').value = '';
+            log('[认证] ' + reason + '，请重新登录');
+        }
+
+        function doLogout() {
+            if (sessionCheckInterval) { clearInterval(sessionCheckInterval); sessionCheckInterval = null; }
+            var user = userPool.getCurrentUser();
+            if (user) {
+                user.globalSignOut({
+                    onSuccess: function() { log('[认证] 已全局登出'); },
+                    onFailure: function() { user.signOut(); }
+                });
+            }
+            document.getElementById('loginOverlay').classList.remove('hidden');
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('newPwForm').style.display = 'none';
+            document.getElementById('loginError').style.display = 'none';
+            document.getElementById('loginInfo').style.display = 'none';
+            document.getElementById('loginPassword').value = '';
+            log('[认证] 已登出');
+        }
+
+        // ==========================================
+        // 主逻辑
+        // ==========================================
+
         let currentServerStatus = null;
 
         async function callLambda(action) {
-            const statusDiv = document.getElementById('statusDisplay');
-            const logDiv = document.getElementById('logs');
-            
-            log(`[发送请求] Action: ${action}...`);
+            var statusDiv = document.getElementById('statusDisplay');
+            log('[发送请求] Action: ' + action + '...');
 
             try {
-                const headers = {
-                    'Content-Type': 'application/json'
-                };
-                
-                if (API_KEY) {
-                    headers['x-api-key'] = API_KEY;
+                var token = await getIdToken();
+                if (!token) {
+                    log('[错误] 未登录或 token 已过期，请重新登录');
+                    doLogout();
+                    return null;
                 }
 
-                const response = await fetch(API_ENDPOINT, {
+                var response = await fetch(API_ENDPOINT, {
                     method: 'POST',
-                    headers: headers,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': token
+                    },
                     body: JSON.stringify({ action: action })
                 });
 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                if (response.status === 401) {
+                    log('[错误] 认证失败 (401)，请重新登录');
+                    doLogout();
+                    return null;
                 }
 
-                const data = await response.json();
-                
-                // 更新UI和状态
+                var data = await response.json();
+
+                if (!response.ok) {
+                    var errMsg = data.error || ('HTTP error ' + response.status);
+                    statusDiv.innerHTML = '<span style="color:#cb2431">' + errMsg + '</span>';
+                    log('[错误] ' + errMsg);
+                    return null;
+                }
+
                 if (data.status) {
-                    const statusText = data.status.toUpperCase();
-                    let color = '#333';
-                    
+                    var statusText = data.status.toUpperCase();
+                    var color = '#333';
+
                     if (statusText === 'RUNNING') color = '#2ea44f';
                     else if (statusText === 'STOPPED') color = '#cb2431';
                     else if (statusText === 'PENDING' || statusText === 'STOPPING') color = '#dbab09';
-                    
-                    const ipInfo = data.ip && data.ip !== 'N/A' ? ` (IP: ${data.ip})` : '';
-                    statusDiv.innerHTML = `<span style="color:${color}">${statusText}</span>${ipInfo}`;
-                    
-                    // 更新全局状态（Dify 区域当前默认常显，不随状态切换）
+
+                    var ipInfo = data.ip && data.ip !== 'N/A' ? ' (IP: ' + data.ip + ')' : '';
+                    statusDiv.innerHTML = '<span style="color:' + color + '">' + statusText + '</span>' + ipInfo;
                     currentServerStatus = statusText;
                 }
-                
-                log(`[响应成功] ${JSON.stringify(data)}`);
+
+                log('[响应成功] ' + JSON.stringify(data));
                 return data;
 
             } catch (error) {
                 console.error('API Error:', error);
-                statusDiv.innerHTML = '<span style="color:#cb2431">⚠️ 连接失败</span>';
-                log(`[错误] ${error.message}`);
+                statusDiv.innerHTML = '<span style="color:#cb2431">连接失败</span>';
+                log('[错误] ' + error.message);
                 return null;
             }
         }
 
-        // 页面加载时显示 Dify 区域并加载 iframe（默认进入即可使用）
         function initDifySection() {
-            const difySection = document.getElementById('difySection');
-            const difyIframe = document.getElementById('difyIframe');
-            const difyPlaceholder = document.getElementById('difyPlaceholder');
-            
+            var difySection = document.getElementById('difySection');
+            var difyIframe = document.getElementById('difyIframe');
+            var difyPlaceholder = document.getElementById('difyPlaceholder');
+
             difySection.style.display = 'block';
             if (!difyIframe.src) {
-                // 先显示 iframe，占位层盖在上面；这样 iframe 始终参与布局，Dify 能正确渲染
                 difyIframe.style.display = 'block';
                 difyIframe.src = DIFY_EMBED_URL;
                 difyIframe.onload = function() {
                     window._difyIframeLoaded = true;
                     difyPlaceholder.classList.add('hidden');
                     log('[Dify] AI分析工具已加载完成');
-                    // 嵌入成功则不显示角标链接，保持界面干净
                 };
                 difyIframe.onerror = function() {
                     difyPlaceholder.classList.add('hidden');
-                    difyPlaceholder.innerHTML = `
-                        <div class="icon">❌</div>
-                        <div>AI分析工具加载失败</div>
-                        <small style="margin-top: 10px;">请检查DIFY_EMBED_URL配置</small>
-                    `;
+                    difyPlaceholder.innerHTML = '<div class="icon">X</div><div>AI分析工具加载失败</div><small style="margin-top:10px;">请检查DIFY_EMBED_URL配置</small>';
                     difyPlaceholder.classList.remove('hidden');
-                    log('[Dify错误] iframe加载失败，请检查DIFY_EMBED_URL配置');
+                    log('[Dify错误] iframe加载失败');
                 };
-                // 若 8 秒后仍未 onload，隐藏占位层并显示备用入口（链接 + 大面板）
                 setTimeout(function() {
                     if (!difyPlaceholder.classList.contains('hidden')) {
                         difyPlaceholder.classList.add('hidden');
-                        log('[Dify] 已显示嵌入页面（若仍空白请检查网络或 DIFY_EMBED_URL）');
+                        log('[Dify] 已显示嵌入页面');
                     }
                     showDifyFallbackLink();
                     if (!window._difyIframeLoaded) {
@@ -286,6 +529,7 @@
                 }, 8000);
             }
         }
+
         function showDifyFallbackLink() {
             var container = document.querySelector('.dify-iframe-container');
             if (!container || document.getElementById('difyFallbackLink')) return;
@@ -300,7 +544,7 @@
         }
 
         function controlServer(action) {
-            if (!confirm(`确定要执行 ${action.toUpperCase()} 操作吗？`)) return;
+            if (!confirm('确定要执行 ' + action.toUpperCase() + ' 操作吗？')) return;
             callLambda(action);
         }
 
@@ -309,23 +553,35 @@
         }
 
         function log(msg) {
-            const logDiv = document.getElementById('logs');
-            const time = new Date().toLocaleTimeString();
-            logDiv.innerText = `[${time}] ${msg}\n` + logDiv.innerText;
+            var logDiv = document.getElementById('logs');
+            var time = new Date().toLocaleTimeString();
+            logDiv.innerText = '[' + time + '] ' + msg + '\n' + logDiv.innerText;
         }
 
-        // 页面加载时：等布局稳定后再加载 iframe，并检查 EC2 状态
+        // Page init: check for existing session
         window.onload = function() {
             var openSame = document.getElementById('difyOpenSame');
             var openNew = document.getElementById('difyOpenNew');
             if (openSame) { openSame.href = DIFY_EMBED_URL; openSame.onclick = function(e) { e.preventDefault(); window.location.href = DIFY_EMBED_URL; }; }
             if (openNew) openNew.href = DIFY_EMBED_URL;
-            requestAnimationFrame(function() {
-                requestAnimationFrame(function() {
-                    initDifySection();
+
+            // Check existing Cognito session
+            var user = userPool.getCurrentUser();
+            if (user) {
+                user.getSession(function(err, session) {
+                    if (!err && session && session.isValid()) {
+                        onLoginSuccess();
+                    }
                 });
+            }
+
+            // Allow Enter key to submit login
+            document.getElementById('loginPassword').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') doLogin();
             });
-            checkStatus();
+            document.getElementById('newPassword').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') doSetNewPassword();
+            });
         };
     </script>
 </body>
