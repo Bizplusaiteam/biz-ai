@@ -491,9 +491,14 @@
         function updateHealthDisplay() {
             var div = document.getElementById('healthDisplay');
             var timeout = healthRetryCount >= 60;
-            var cls = healthBackendOk ? 'ok' : (timeout ? 'fail' : 'wait');
-            var text = healthBackendOk ? 'OK' : (timeout ? 'ERROR' : '检查中...');
-            div.innerHTML = '<span class="label">后端:</span> <span class="' + cls + '">' + text + '</span>';
+            if (healthBackendOk) {
+                div.innerHTML = '<span class="ok">服务就绪</span>';
+            } else if (timeout) {
+                div.innerHTML = '<span class="fail">服务未就绪</span>';
+            } else {
+                var elapsed = healthRetryCount * 5;
+                div.innerHTML = '<span class="wait">等待服务启动... ' + elapsed + 's/300s</span>';
+            }
             div.style.display = 'block';
         }
 
