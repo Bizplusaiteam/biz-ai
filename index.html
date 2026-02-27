@@ -101,6 +101,20 @@
         .btn-stop { background-color: #cb2431; color: white; }
         .btn-refresh { background-color: #0366d6; color: white; }
         .btn-logout { background-color: #6a737d; color: white; font-size: 11px; padding: 4px 8px; }
+        .health-box {
+            background: #fff;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            border: 1px solid #d1d5da;
+            align-self: center;
+            flex-shrink: 0;
+            display: none;
+        }
+        .health-box .label { color: #586069; }
+        .health-box .ok { color: #2ea44f; font-weight: 600; }
+        .health-box .fail { color: #cb2431; font-weight: 600; }
+        .health-box .wait { color: #dbab09; font-weight: 600; }
 
         #logs {
             flex: 1;
@@ -211,6 +225,7 @@
     <header class="page-header">
         <h1>AI OCR 服务器控制台</h1>
         <div id="statusDisplay" class="status-box">检测中...</div>
+        <div id="healthDisplay" class="health-box"></div>
         <div class="controls">
             <button onclick="checkStatus()" class="btn-refresh">刷新状态</button>
             <button onclick="controlServer('start')" class="btn-start">启动</button>
@@ -435,6 +450,52 @@
         // ==========================================
 
         let currentServerStatus = null;
+        let healthCheckTimer = null;
+        let healthRetryCount = 0;
+        let healthBackendOk = false;
+
+        function startHealthChecks(ip) {
+            stopHealthChecks();
+            healthRetryCount = 0;
+            healthBackendOk = false;
+            var healthDiv = document.getElementById('healthDisplay');
+            healthDiv.style.display = 'block';
+            log('[健康检查] 开始检查后端服务 (IP: ' + ip + ')...');
+            doHealthCheck(ip);
+            healthCheckTimer = setInterval(function() { doHealthCheck(ip); }, 5000);
+        }
+
+        function doHealthCheck(ip) {
+            if (healthBackendOk) {
+                stopHealthChecks();
+                log('[健康检查] 后端服务已就绪');
+                return;
+            }
+            if (healthRetryCount >= 60) {
+                stopHealthChecks();
+                log('[健康检查] 超时（5分钟），后端服务未就绪');
+                updateHealthDisplay();
+                return;
+            }
+            healthRetryCount++;
+            fetch('http://' + ip + ':8000/', { mode: 'no-cors', signal: AbortSignal.timeout(4000) })
+                .then(function() { healthBackendOk = true; log('[健康检查] 后端服务 :8000 已就绪'); updateHealthDisplay(); })
+                .catch(function() {});
+            updateHealthDisplay();
+        }
+
+        function stopHealthChecks() {
+            if (healthCheckTimer) { clearInterval(healthCheckTimer); healthCheckTimer = null; }
+        }
+
+        function updateHealthDisplay() {
+            var div = document.getElementById('healthDisplay');
+            var timeout = healthRetryCount >= 60;
+            var cls = healthBackendOk ? 'ok' : (timeout ? 'fail' : 'wait');
+            var text = healthBackendOk ? 'OK' : (timeout ? 'ERROR' : '检查中...');
+            div.innerHTML = '<span class="label">后端:</span> <span class="' + cls + '">' + text + '</span>';
+            div.style.display = 'block';
+        }
 
         async function callLambda(action) {
             var statusDiv = document.getElementById('statusDisplay');
@@ -483,6 +544,17 @@
                     var ipInfo = data.ip && data.ip !== 'N/A' ? ' (IP: ' + data.ip + ')' : '';
                     statusDiv.innerHTML = '<span style="color:' + color + '">' + statusText + '</span>' + ipInfo;
                     currentServerStatus = statusText;
+
+                    // EC2 运行中且有 IP 时自动启动健康检查
+                    if (statusText === 'RUNNING' && data.ip && data.ip !== 'N/A' && !healthCheckTimer && !healthBackendOk) {
+                        startHealthChecks(data.ip);
+                    }
+                    // EC2 不在运行状态时停止健康检查并隐藏
+                    if (statusText !== 'RUNNING') {
+                        stopHealthChecks();
+                        healthBackendOk = false;
+                        document.getElementById('healthDisplay').style.display = 'none';
+                    }
                 }
 
                 log('[响应成功] ' + JSON.stringify(data));
