@@ -15,7 +15,7 @@
             font-family: -apple-system, sans-serif;
             color: #333;
             display: grid;
-            grid-template-rows: auto 1fr;
+            grid-template-rows: 100px 1fr;
             overflow: hidden;
         }
 
@@ -73,8 +73,10 @@
             background: #f6f8fa;
             border-bottom: 1px solid #e1e4e8;
             min-height: 0;
+            height: 100%;
+            overflow: hidden;
         }
-        .page-header h1 { margin: 0; font-size: 1.2rem; font-weight: 600; white-space: nowrap; }
+        .page-header h1 { margin: 0; font-size: 1.2rem; font-weight: 600; white-space: nowrap; align-self: center; }
         .status-box {
             background: #fff;
             padding: 6px 12px;
@@ -119,6 +121,7 @@
         #logs {
             flex: 1;
             min-width: 0;
+            min-height: 0;
             background: #24292e;
             color: #e1e4e8;
             padding: 6px 10px;
@@ -632,7 +635,8 @@
         function log(msg) {
             var logDiv = document.getElementById('logs');
             var time = new Date().toLocaleTimeString();
-            logDiv.innerText = '[' + time + '] ' + msg + '\n' + logDiv.innerText;
+            logDiv.innerText = (logDiv.innerText || '') + '[' + time + '] ' + msg + '\n';
+            logDiv.scrollTop = logDiv.scrollHeight;
         }
 
         // Page init: check for existing session
