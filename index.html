@@ -15,7 +15,7 @@
             font-family: -apple-system, sans-serif;
             color: #333;
             display: grid;
-            grid-template-rows: 100px 1fr;
+            grid-template-rows: auto 1fr;
             overflow: hidden;
         }
 
@@ -73,10 +73,8 @@
             background: #f6f8fa;
             border-bottom: 1px solid #e1e4e8;
             min-height: 0;
-            height: 100%;
-            overflow: hidden;
         }
-        .page-header h1 { margin: 0; font-size: 1.2rem; font-weight: 600; white-space: nowrap; align-self: center; }
+        .page-header h1 { margin: 0; font-size: 1.2rem; font-weight: 600; white-space: nowrap; }
         .status-box {
             background: #fff;
             padding: 6px 12px;
@@ -121,7 +119,6 @@
         #logs {
             flex: 1;
             min-width: 0;
-            min-height: 0;
             background: #24292e;
             color: #e1e4e8;
             padding: 6px 10px;
@@ -464,11 +461,11 @@
             var healthDiv = document.getElementById('healthDisplay');
             healthDiv.style.display = 'block';
             log('[健康检查] 开始检查后端服务 (IP: ' + ip + ')...');
-            doHealthCheck(ip);
-            healthCheckTimer = setInterval(function() { doHealthCheck(ip); }, 5000);
+            doHealthCheck();
+            healthCheckTimer = setInterval(doHealthCheck, 5000);
         }
 
-        function doHealthCheck(ip) {
+        function doHealthCheck() {
             if (healthBackendOk) {
                 stopHealthChecks();
                 log('[健康检查] 后端服务已就绪');
@@ -481,10 +478,31 @@
                 return;
             }
             healthRetryCount++;
-            fetch('http://' + ip + ':8000/', { mode: 'no-cors', signal: AbortSignal.timeout(4000) })
-                .then(function() { healthBackendOk = true; log('[健康检查] 后端服务 :8000 已就绪'); updateHealthDisplay(); })
-                .catch(function() {});
+            probeBackend().then(function(ready) {
+                if (ready) {
+                    healthBackendOk = true;
+                    log('[健康检查] 后端服务 :8000 已就绪');
+                }
+                updateHealthDisplay();
+            });
             updateHealthDisplay();
+        }
+
+        async function probeBackend() {
+            try {
+                var token = await getIdToken();
+                if (!token) return false;
+                var resp = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': token },
+                    body: JSON.stringify({ action: 'health-check' })
+                });
+                if (!resp.ok) return false;
+                var data = await resp.json();
+                return data.backendReady === true;
+            } catch (e) {
+                return false;
+            }
         }
 
         function stopHealthChecks() {
@@ -635,8 +653,7 @@
         function log(msg) {
             var logDiv = document.getElementById('logs');
             var time = new Date().toLocaleTimeString();
-            logDiv.innerText = (logDiv.innerText || '') + '[' + time + '] ' + msg + '\n';
-            logDiv.scrollTop = logDiv.scrollHeight;
+            logDiv.innerText = '[' + time + '] ' + msg + '\n' + logDiv.innerText;
         }
 
         // Page init: check for existing session
@@ -667,3 +684,4 @@
     </script>
 </body>
 </html>
+
